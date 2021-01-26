@@ -10,16 +10,17 @@ pub trait Parser {
 // https://doc.rust-lang.org/src/core/iter/traits/iterator.rs.html#97-3286
 // https://doc.rust-lang.org/src/core/iter/adapters/mod.rs.html#884-887
 
-pub struct Map<'a, A, F> {
-    parser: &'a dyn Parser<Out=A>,
+pub struct Map<P, F> {
+    parser: P,
     func: F 
 }
 
-impl<'a, A, B, F> Map<'a, A, F>
+impl<P, F, A> Map<P, F>
 where
-    F: Fn(A) -> B 
+    P: Parser,
+    F: Fn(<P as Parser>::Out) -> A 
 {
-    pub fn new(parser: &'a dyn Parser<Out=A>, func: F) -> Self {
+    pub fn new(parser: P, func: F) -> Self {
         Self {
             parser,
             func
@@ -27,31 +28,34 @@ where
     }
 }
 
-impl<'a, A, B, F> Parser for Map<'a, A, F>  
+impl<P, F, A> Parser for Map<P, F>  
 where
-    F: Fn(A) -> B
+    P: Parser,
+    F: Fn(<P as Parser>::Out) -> A
 {
-    type Out = B;
+    type Out = A;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
         let f = self.func;
-        self.parser.call(input).map(|(a, b)| {
+        self.parser.call(input).map(move |(a, b)| {
             (f(a), b)
         })
     }
 }
 
 
-pub struct Bind<'a, A, F> {
-    parser: &'a dyn Parser<Out=A>,
+pub struct Bind<P, F> {
+    parser: P,
     func: F
 }
 
-impl<'a, A, B, F> Bind<'a, A, F> 
+impl<P, F, Q> Bind<P, F> 
 where
-    F: Fn(A) -> Box<dyn Parser<Out=B>>,
+    P: Parser,
+    Q: Parser,
+    F: Fn(<P as Parser>::Out) -> Q,
 {
-    pub fn new(parser: &'a dyn Parser<Out=A>, func: F) -> Self {
+    pub fn new(parser: P, func: F) -> Self {
         Self {
             parser,
             func
@@ -59,11 +63,13 @@ where
     }
 }
 
-impl<'a, A, B, F> Parser for Bind<'a, A, F> 
+impl<P, F, Q> Parser for Bind<P, F> 
 where
-    F: Fn(A) -> Box<dyn Parser<Out=B>>
+    P: Parser,
+    Q: Parser,
+    F: Fn(<P as Parser>::Out) -> Q 
 {
-    type Out = B;
+    type Out = <Q as Parser>::Out;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
         let f = self.func;
@@ -76,7 +82,7 @@ where
 
 pub trait ParserOps : Parser {
 
-    fn map<F, A>(&self, func: F) -> Map<<Self as Parser>::Out, F>
+    fn map<F, A>(self, func: F) -> Map<Self, F>
     where
         Self: Sized,
         F: Fn(<Self as Parser>::Out) -> A
@@ -84,10 +90,11 @@ pub trait ParserOps : Parser {
         Map::new(self, func)
     }
 
-    fn bind<F, A>(&self, func: F) -> Bind<<Self as Parser>::Out, F>
+    fn bind<F, Q>(self, func: F) -> Bind<Self, F>
     where
         Self: Sized,
-        F: Fn(<Self as Parser>::Out) -> Box<dyn Parser<Out=A>>
+        Q: Parser,
+        F: Fn(<Self as Parser>::Out) -> Q 
     {
         Bind::new(self, func)
     }
@@ -208,26 +215,26 @@ impl<P: Parser> Take<P> {
     }
 }
 
-// impl<P: Parser> Parser for Take<P> {
-//     type Out = Vec<<P as Parser>::Out>;
+impl<P: Parser> Parser for Take<P> {
+    type Out = Vec<<P as Parser>::Out>;
 
-//     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
-//         // let init = Zero::<<P as Parser>::Out>::new().bind(|item| Return::new(item));
-//         // let init = Return::new(Vec::new());
-//         let init = Box::new(Return::new(Vec::new())) as Box<dyn Parser<Out = Self::Out>>;
-//         (0..self.count)
-//             .map(|_| self.parser)
-//             .fold(init, |result, parser| {
-//                 Box::new(result.bind(|vec| {
-//                     parser.bind(|item| {
-//                         vec.push(item);
-//                         Return::new(vec)
-//                     })
-//                 }))
-//             })
-//             .call(input)
-//     }
-// }
+    fn call(self, input: &str) -> Option<(Self::Out, &str)> {
+        // let init = Zero::<<P as Parser>::Out>::new().bind(|item| Return::new(item));
+        // let init = Return::new(Vec::new());
+        let init = Return::new(Vec::new()); 
+        (0..self.count)
+            .map(|_| self.parser)
+            .fold(init, |result, parser| {
+                result.bind(|vec| {
+                    parser.bind(|item| {
+                        vec.push(item);
+                        Return::new(vec)
+                    })
+                })
+            })
+            .call(input)
+    }
+}
 
 
 #[cfg(test)]
@@ -245,7 +252,7 @@ mod tests {
                 .call(&stuff)
                 .unwrap();
 
-        assert_eq!(9009, result);
+        assert_eq!("hi, h", result);
     }
 
     #[test]
@@ -259,6 +266,6 @@ mod tests {
                 .call(&stuff)
                 .unwrap();
 
-        assert_eq!(9009, result);
+        assert_eq!("hi, h", result);
     }
 }
