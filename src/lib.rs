@@ -1,5 +1,5 @@
-use std::convert::TryInto;
-use std::array::TryFromSliceError;
+// use std::convert::TryInto;
+// use std::array::TryFromSliceError;
 
 pub trait Parser {
     type Out;
@@ -10,17 +10,16 @@ pub trait Parser {
 // https://doc.rust-lang.org/src/core/iter/traits/iterator.rs.html#97-3286
 // https://doc.rust-lang.org/src/core/iter/adapters/mod.rs.html#884-887
 
-pub struct Map<P, F> {
-    parser: P,
-    func: F
+pub struct Map<'a, A, F> {
+    parser: &'a dyn Parser<Out=A>,
+    func: F 
 }
 
-impl<A, P: Parser, F> Map<P, F>
+impl<'a, A, B, F> Map<'a, A, F>
 where
-    P: Parser,
-    F: Fn(<P as Parser>::Out) -> A 
+    F: Fn(A) -> B 
 {
-    pub fn new(parser: P, func: F) -> Self {
+    pub fn new(parser: &'a dyn Parser<Out=A>, func: F) -> Self {
         Self {
             parser,
             func
@@ -28,12 +27,11 @@ where
     }
 }
 
-impl<A, P, F> Parser for Map<P, F>  
+impl<'a, A, B, F> Parser for Map<'a, A, F>  
 where
-    P: Parser,
-    F: Fn(<P as Parser>::Out) -> A
+    F: Fn(A) -> B
 {
-    type Out = A;
+    type Out = B;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
         let f = self.func;
@@ -44,18 +42,16 @@ where
 }
 
 
-pub struct Bind<P, F> {
-    parser: P,
+pub struct Bind<'a, A, F> {
+    parser: &'a dyn Parser<Out=A>,
     func: F
 }
 
-impl<P, F, Q> Bind<P, F> 
+impl<'a, A, B, F> Bind<'a, A, F> 
 where
-    P: Parser,
-    Q: Parser,
-    F: Fn(<P as Parser>::Out) -> Q,
+    F: Fn(A) -> Box<dyn Parser<Out=B>>,
 {
-    pub fn new(parser: P, func: F) -> Self {
+    pub fn new(parser: &'a dyn Parser<Out=A>, func: F) -> Self {
         Self {
             parser,
             func
@@ -63,13 +59,11 @@ where
     }
 }
 
-impl<P, F, Q> Parser for Bind<P, F> 
+impl<'a, A, B, F> Parser for Bind<'a, A, F> 
 where
-    P: Parser,
-    Q: Parser,
-    F: Fn(<P as Parser>::Out) -> Q
+    F: Fn(A) -> Box<dyn Parser<Out=B>>
 {
-    type Out = <Q as Parser>::Out;
+    type Out = B;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
         let f = self.func;
@@ -82,19 +76,18 @@ where
 
 pub trait ParserOps : Parser {
 
-    fn map<F, A>(self, func: F) -> Map<Self, F>
+    fn map<F, A>(&self, func: F) -> Map<<Self as Parser>::Out, F>
     where
         Self: Sized,
-        F: Fn(Self::Out) -> A
+        F: Fn(<Self as Parser>::Out) -> A
     {
         Map::new(self, func)
     }
 
-    fn bind<F, P>(self, func: F) -> Bind<Self, F>
+    fn bind<F, A>(&self, func: F) -> Bind<<Self as Parser>::Out, F>
     where
         Self: Sized,
-        P: Parser,
-        F: Fn(Self::Out) -> P
+        F: Fn(<Self as Parser>::Out) -> Box<dyn Parser<Out=A>>
     {
         Bind::new(self, func)
     }
@@ -215,26 +208,26 @@ impl<P: Parser> Take<P> {
     }
 }
 
-impl<P: Parser> Parser for Take<P> {
-    type Out = Vec<<P as Parser>::Out>;
+// impl<P: Parser> Parser for Take<P> {
+//     type Out = Vec<<P as Parser>::Out>;
 
-    fn call(self, input: &str) -> Option<(Self::Out, &str)> {
-        // let init = Zero::<<P as Parser>::Out>::new().bind(|item| Return::new(item));
-        // let init = Return::new(Vec::new());
-        let init = Box::new(Return::new(Vec::new())) as Box<dyn Parser<Out = Self::Out>>;
-        (0..self.count)
-            .map(|_| self.parser)
-            .fold(init, |result, parser| {
-                Box::new(result.bind(|vec| {
-                    parser.bind(|item| {
-                        vec.push(item);
-                        Return::new(vec)
-                    })
-                }))
-            })
-            .call(input)
-    }
-}
+//     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
+//         // let init = Zero::<<P as Parser>::Out>::new().bind(|item| Return::new(item));
+//         // let init = Return::new(Vec::new());
+//         let init = Box::new(Return::new(Vec::new())) as Box<dyn Parser<Out = Self::Out>>;
+//         (0..self.count)
+//             .map(|_| self.parser)
+//             .fold(init, |result, parser| {
+//                 Box::new(result.bind(|vec| {
+//                     parser.bind(|item| {
+//                         vec.push(item);
+//                         Return::new(vec)
+//                     })
+//                 }))
+//             })
+//             .call(input)
+//     }
+// }
 
 
 #[cfg(test)]
@@ -243,11 +236,12 @@ mod tests {
 
     #[test]
     fn map_test() {
-        let stuff = [0b00000000, 0b00000000, 0b00100011, 0b00101000];
+        // let stuff = [0b00000000, 0b00000000, 0b00100011, 0b00101000];
+        let stuff = "hello world";
 
         let (result, _) = 
-            IntItem::new(Endian::Big)
-                .map(|x| x + 9)
+            Item::new()
+                .map(|x| format!("hi, {}", x))
                 .call(&stuff)
                 .unwrap();
 
@@ -256,11 +250,12 @@ mod tests {
 
     #[test]
     fn bind_test() {
-        let stuff = [0b00000000, 0b00000000, 0b00100011, 0b00101000];
+        // let stuff = [0b00000000, 0b00000000, 0b00100011, 0b00101000];
+        let stuff = "hello world";
 
         let (result, _) = 
-            IntItem::new(Endian::Big)
-                .bind(|x| Return::new(x + 9))
+            Item::new()
+                .bind(|x| Return::new(format!("hi, {}", x)))
                 .call(&stuff)
                 .unwrap();
 
