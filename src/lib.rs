@@ -5,11 +5,30 @@ pub trait Parser {
     type Out;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)>;
+
+
+    fn map<F, A>(self, func: F) -> Map<Self, F>
+    where
+        Self: Sized,
+        F: Fn(<Self as Parser>::Out) -> A
+    {
+        Map::new(self, func)
+    }
+
+    fn bind<F, Q>(self, func: F) -> Bind<Self, F>
+    where
+        Self: Sized,
+        Q: Parser,
+        F: Fn(<Self as Parser>::Out) -> Q 
+    {
+        Bind::new(self, func)
+    }
 }
 
 // https://doc.rust-lang.org/src/core/iter/traits/iterator.rs.html#97-3286
 // https://doc.rust-lang.org/src/core/iter/adapters/mod.rs.html#884-887
 
+#[derive(Copy, Clone)]
 pub struct Map<P, F> {
     parser: P,
     func: F 
@@ -44,6 +63,7 @@ where
 }
 
 
+#[derive(Copy, Clone)]
 pub struct Bind<P, F> {
     parser: P,
     func: F
@@ -80,30 +100,30 @@ where
 }
 
 
-pub trait ParserOps : Parser {
+// pub trait ParserOps : Parser {
 
-    fn map<F, A>(self, func: F) -> Map<Self, F>
-    where
-        Self: Sized,
-        F: Fn(<Self as Parser>::Out) -> A
-    {
-        Map::new(self, func)
-    }
+//     fn map<F, A>(self, func: F) -> Map<Self, F>
+//     where
+//         Self: Sized,
+//         F: Fn(<Self as Parser>::Out) -> A
+//     {
+//         Map::new(self, func)
+//     }
 
-    fn bind<F, Q>(self, func: F) -> Bind<Self, F>
-    where
-        Self: Sized,
-        Q: Parser,
-        F: Fn(<Self as Parser>::Out) -> Q 
-    {
-        Bind::new(self, func)
-    }
-}
-
-
-impl<P: Parser> ParserOps for P {}
+//     fn bind<F, Q>(self, func: F) -> Bind<Self, F>
+//     where
+//         Self: Sized,
+//         Q: Parser,
+//         F: Fn(<Self as Parser>::Out) -> Q 
+//     {
+//         Bind::new(self, func)
+//     }
+// }
 
 
+// impl<P: Parser> ParserOps for P {}
+
+#[derive(Copy, Clone)]
 pub struct Zero<A> {
     phantom: std::marker::PhantomData<A>
 }
@@ -122,7 +142,7 @@ impl<A> Parser for Zero<A> {
     }
 }
 
-
+#[derive(Copy, Clone)]
 pub struct Return<A> {
     data: A
 }
@@ -141,48 +161,7 @@ impl<A> Parser for Return<A> {
     }
 }
 
-
-// pub struct IntItem {
-//     endian: Endian
-// }
-
-// impl IntItem {
-//     pub fn new(endian: Endian) -> Self {
-//         Self { 
-//             endian
-//         }
-//     }
-// }
-
-// impl Parser for IntItem {
-//     type Out = i32;
-
-//     fn call(self, bytes: &[u8]) -> Option<(Self::Out, &[u8])> {
-//         self.endian.read_int(bytes).ok()
-//     }
-// }
-
-
-// pub struct DoubleItem {
-//     endian: Endian
-// }
-
-// impl DoubleItem {
-//     pub fn new(endian: Endian) -> Self {
-//         Self { 
-//             endian
-//         }
-//     }
-// }
-
-// impl Parser for DoubleItem {
-//     type Out = f64;
-
-//     fn call(self, bytes: &[u8]) -> Option<(Self::Out, &[u8])> {
-//         self.endian.read_double(bytes).ok()
-//     }
-// }
-
+#[derive(Copy, Clone)]
 pub struct Item {
 
 }
@@ -215,24 +194,24 @@ impl<P: Parser> Take<P> {
     }
 }
 
-impl<P: Parser> Parser for Take<P> {
+impl<P: Parser + Copy> Parser for Take<P> {
     type Out = Vec<<P as Parser>::Out>;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
-        // let init = Zero::<<P as Parser>::Out>::new().bind(|item| Return::new(item));
-        // let init = Return::new(Vec::new());
-        let init = Return::new(Vec::new()); 
-        (0..self.count)
-            .map(|_| self.parser)
-            .fold(init, |result, parser| {
-                result.bind(|vec| {
-                    parser.bind(|item| {
-                        vec.push(item);
-                        Return::new(vec)
-                    })
-                })
-            })
-            .call(input)
+        
+        let mut v = Vec::new();
+        let mut rest = input;
+        for _ in 0..self.count {
+            match self.parser.call(rest) {
+                None => return None,
+                Some((item, string)) => {
+                    v.push(item);
+                    rest = string;
+                }
+            }
+        }
+
+        Some((v, rest))
     }
 }
 
@@ -243,7 +222,6 @@ mod tests {
 
     #[test]
     fn map_test() {
-        // let stuff = [0b00000000, 0b00000000, 0b00100011, 0b00101000];
         let stuff = "hello world";
 
         let (result, _) = 
@@ -257,7 +235,6 @@ mod tests {
 
     #[test]
     fn bind_test() {
-        // let stuff = [0b00000000, 0b00000000, 0b00100011, 0b00101000];
         let stuff = "hello world";
 
         let (result, _) = 
@@ -267,5 +244,34 @@ mod tests {
                 .unwrap();
 
         assert_eq!("hi, h", result);
+    }
+
+    #[test]
+    fn take_test() {
+        let stuff = "hello world";
+
+        let (result, rest) = 
+            Take::new(3, Item::new())
+                .call(&stuff)
+                .unwrap();
+
+        assert_eq!(vec!['h', 'e', 'l'], result);
+        assert_eq!("lo world", rest);
+    }
+
+
+    #[test]
+    fn probably_not_needed_take_test() {
+        let stuff = "hello world";
+
+        let (result, rest) = 
+            Take::new(3, Item::new())
+                .map(|it| it.len()) 
+                .call(&stuff)
+                .unwrap();
+
+        // assert_eq!(vec!['h', 'e', 'l'], result);
+        assert_eq!(3, result);
+        assert_eq!("lo world", rest);
     }
 }
