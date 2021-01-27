@@ -10,17 +10,16 @@ pub trait Parser {
 // https://doc.rust-lang.org/src/core/iter/traits/iterator.rs.html#97-3286
 // https://doc.rust-lang.org/src/core/iter/adapters/mod.rs.html#884-887
 
-pub struct Map<P, F> {
-    parser: P,
+pub struct Map<F, A> {
+    parser: Box<dyn Parser<Out=A>>,
     func: F 
 }
 
-impl<P, F, A> Map<P, F>
+impl<F, A, B> Map<F, A>
 where
-    P: Parser,
-    F: Fn(<P as Parser>::Out) -> A 
+    F: Fn(A) -> B 
 {
-    pub fn new(parser: P, func: F) -> Self {
+    pub fn new(parser: Box<dyn Parser<Out=A>>, func: F) -> Self {
         Self {
             parser,
             func
@@ -28,12 +27,11 @@ where
     }
 }
 
-impl<P, F, A> Parser for Map<P, F>  
+impl<F, A, B> Parser for Map<F, A>  
 where
-    P: Parser,
-    F: Fn(<P as Parser>::Out) -> A
+    F: Fn(A) -> B
 {
-    type Out = A;
+    type Out = B;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
         let f = self.func;
@@ -44,18 +42,16 @@ where
 }
 
 
-pub struct Bind<P, F> {
-    parser: P,
+pub struct Bind<F, A> {
+    parser: Box<dyn Parser<Out=A>>,
     func: F
 }
 
-impl<P, F, Q> Bind<P, F> 
+impl<F, A, B> Bind<F, A> 
 where
-    P: Parser,
-    Q: Parser,
-    F: Fn(<P as Parser>::Out) -> Q,
+    F: Fn(A) -> Box<dyn Parser<Out=B>>,
 {
-    pub fn new(parser: P, func: F) -> Self {
+    pub fn new(parser: Box<dyn Parser<Out=A>>, func: F) -> Self {
         Self {
             parser,
             func
@@ -63,13 +59,11 @@ where
     }
 }
 
-impl<P, F, Q> Parser for Bind<P, F> 
+impl<F, A, B> Parser for Bind<F, A> 
 where
-    P: Parser,
-    Q: Parser,
-    F: Fn(<P as Parser>::Out) -> Q 
+    F: Fn(A) -> Box<dyn Parser<Out=B>>
 {
-    type Out = <Q as Parser>::Out;
+    type Out = B;
 
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
         let f = self.func;
@@ -80,28 +74,27 @@ where
 }
 
 
-pub trait ParserOps : Parser {
+pub trait ParserOps<A> : Parser<Out=A> {
 
-    fn map<F, A>(self, func: F) -> Map<Self, F>
+    fn map<F, B>(self, func: F) -> Map<F, A>
     where
-        Self: Sized,
-        F: Fn(<Self as Parser>::Out) -> A
+        Self: Sized + 'static,
+        F: Fn(A) -> B
     {
-        Map::new(self, func)
+        Map::new(Box::new(self), func)
     }
 
-    fn bind<F, Q>(self, func: F) -> Bind<Self, F>
+    fn bind<F, B>(self, func: F) -> Bind<F, A>
     where
-        Self: Sized,
-        Q: Parser,
-        F: Fn(<Self as Parser>::Out) -> Q 
+        Self: Sized + 'static,
+        F: Fn(A) -> Box<dyn Parser<Out=B>>
     {
-        Bind::new(self, func)
+        Bind::new(Box::new(self), func)
     }
 }
 
 
-impl<P: Parser> ParserOps for P {}
+impl<A> ParserOps<A> for dyn Parser<Out=A> {}
 
 
 pub struct Zero<A> {
@@ -221,16 +214,16 @@ impl<P: Parser> Parser for Take<P> {
     fn call(self, input: &str) -> Option<(Self::Out, &str)> {
         // let init = Zero::<<P as Parser>::Out>::new().bind(|item| Return::new(item));
         // let init = Return::new(Vec::new());
-        let init = Return::new(Vec::new()); 
+        let init = Box::new(Return::new(Vec::new())); 
         (0..self.count)
             .map(|_| self.parser)
             .fold(init, |result, parser| {
-                result.bind(|vec| {
-                    parser.bind(|item| {
+                Box::new(result.bind(|vec| {
+                    Box::new(parser.bind(|item| {
                         vec.push(item);
                         Return::new(vec)
-                    })
-                })
+                    }))
+                }))
             })
             .call(input)
     }
