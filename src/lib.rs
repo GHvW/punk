@@ -108,7 +108,7 @@ pub trait ParserOps<A> : Parser<Out=A> {
 }
 
 
-impl<A> ParserOps<A> for A where A: Parser<Out=A> {}
+impl<A, B> ParserOps<B> for A where A: Parser<Out=B> {}
 
 
 pub struct Zero<A> {
@@ -196,10 +196,16 @@ impl<A> Parser for Take<A> {
     }
 }
 
-fn take_reduce<A>(agg: Box<dyn Parser<Out=Vec<Box<A>>>>, next: Box<dyn Parser<Out=A>>) -> impl Parser<Out=Vec<Box<A>>> {
-    agg.bind(|v| {
-        Box::new(next.bind(|a| {                
-            v.push(Box::new(a));
+fn take_reduce<A>(agg: impl ParserOps<Vec<A>>, next: impl ParserOps<A>) -> impl ParserOps<Vec<A>> {
+    // agg.bind(|v| {
+    //     Box::new(next.bind(|a| {                
+    //         v.push(a);
+    //         Box::new(Return::new(v))
+    //     }))
+    // })
+    next.bind(|a| {
+        Box::new(agg.bind(move |v| {
+            v.push(a);
             Box::new(Return::new(v))
         }))
     })
@@ -231,7 +237,7 @@ mod tests {
 
         let (result, _) = 
             Item::new()
-                .bind(|x| Return::new(format!("hi, {}", x)))
+                .bind(|x| Box::new(Return::new(format!("hi, {}", x))))
                 .call(&stuff)
                 .unwrap();
 
