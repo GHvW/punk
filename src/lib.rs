@@ -24,6 +24,13 @@ pub trait Parser {
     {
         Bind::new(self, func)
     }
+
+    fn take(self, n: i32) -> Take<Self>
+    where
+        Self: Sized,
+    {
+        Take::new(n, self)
+    }
 }
 
 // https://doc.rust-lang.org/src/core/iter/traits/iterator.rs.html#97-3286
@@ -288,6 +295,21 @@ mod tests {
 
         let (result, rest) = 
             Take::new(3, Item::new())
+                .map(|it| it.iter().map(|c| format!("{}!", c)).collect::<Vec<String>>()) 
+                .call(&stuff)
+                .unwrap();
+
+        assert_eq!(vec!["h!".to_string(), "e!".to_string(), "l!".to_string()], result);
+        assert_eq!("lo world", rest);
+    }
+
+    #[test]
+    fn another_another_probably_not_needed_take_test() {
+        let stuff = "hello world";
+
+        let (result, rest) = 
+            Item::new()
+                .take(3)
                 .map(|it| it.iter().map(|c| format!("{}!", c)).collect::<Vec<String>>()) 
                 .call(&stuff)
                 .unwrap();
