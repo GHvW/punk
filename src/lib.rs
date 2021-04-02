@@ -35,6 +35,7 @@ pub struct Map<P, F> {
     func: F 
 }
 
+
 impl<P, F, A> Map<P, F>
 where
     P: Parser,
@@ -47,6 +48,7 @@ where
         }
     }
 }
+
 
 impl<P, F, A> Parser for Map<P, F>  
 where
@@ -70,6 +72,7 @@ pub struct Bind<P, F> {
     func: F
 }
 
+
 impl<P, F, Q> Bind<P, F> 
 where
     P: Parser,
@@ -83,6 +86,7 @@ where
         }
     }
 }
+
 
 impl<P, F, Q> Parser for Bind<P, F> 
 where
@@ -129,11 +133,13 @@ pub struct Zero<A> {
     phantom: std::marker::PhantomData<A>
 }
 
+
 impl<A> Zero<A> {
     pub fn new() -> Self { 
         Self { phantom: std::marker::PhantomData } 
     }
 }
+
 
 impl<A> Parser for Zero<A> {
     type Out = A;
@@ -143,15 +149,18 @@ impl<A> Parser for Zero<A> {
     }
 }
 
+
 pub struct Return<A> {
     data: Rc<A>
 }
+
 
 impl<A> Return<A> {
     pub fn new(data: A) -> Self {
         Self { data: Rc::new(data) }
     }
 }
+
 
 impl<A> Parser for Return<A> {
     type Out = Rc<A>;
@@ -161,13 +170,16 @@ impl<A> Parser for Return<A> {
     }
 }
 
+
 pub struct Item {}
+
 
 impl Item {
     pub fn new() -> Self {
         Self {}
     }
 }
+
 
 impl Parser for Item {
     type Out = char;
@@ -180,16 +192,19 @@ impl Parser for Item {
     }
 }
 
+
 pub struct Take<P> {
     count: i32,
     parser: P
 }
+
 
 impl<P: Parser> Take<P> {
     pub fn new(count: i32, parser: P) -> Self {
         Self { count, parser }
     }
 }
+
 
 impl<P: Parser> Parser for Take<P> {
     type Out = Vec<<P as Parser>::Out>;
