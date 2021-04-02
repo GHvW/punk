@@ -58,9 +58,7 @@ where
     type Out = A;
 
     fn call<'a>(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
-        // let f = self.func;
         self.parser.call(input).map(move |(a, b)| {
-            // (f(a), b)
             ((self.func)(a), b)
         })
     }
@@ -97,9 +95,7 @@ where
     type Out = <Q as Parser>::Out;
 
     fn call<'a>(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
-        // let f = self.func;
         self.parser.call(input).and_then(|(a, b)| {
-            // f(a).call(b)
             (self.func)(a).call(b)
         })
     }
