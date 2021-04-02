@@ -1,10 +1,11 @@
 // use std::convert::TryInto;
 // use std::array::TryFromSliceError;
+use std::rc::Rc;
 
-pub trait Parser<'a> {
+pub trait Parser {
     type Out;
 
-    fn call(&self, input: &'a str) -> Option<(Self::Out, &'a str)>;
+    fn call<'a>(&self, input: &'a str) -> Option<(Self::Out, &'a str)>;
 
 
     fn map<F, A>(self, func: F) -> Map<Self, F>
@@ -18,7 +19,7 @@ pub trait Parser<'a> {
     fn bind<F, Q>(self, func: F) -> Bind<Self, F>
     where
         Self: Sized,
-        Q: Parser<'a>,
+        Q: Parser,
         F: Fn(<Self as Parser>::Out) -> Q 
     {
         Bind::new(self, func)
@@ -28,15 +29,15 @@ pub trait Parser<'a> {
 // https://doc.rust-lang.org/src/core/iter/traits/iterator.rs.html#97-3286
 // https://doc.rust-lang.org/src/core/iter/adapters/mod.rs.html#884-887
 
-// #[derive(Copy, Clone)]
+
 pub struct Map<P, F> {
     parser: P,
     func: F 
 }
 
-impl<'a, P, F, A> Map<P, F>
+impl<P, F, A> Map<P, F>
 where
-    P: Parser<'a>,
+    P: Parser,
     F: Fn(<P as Parser>::Out) -> A 
 {
     pub fn new(parser: P, func: F) -> Self {
@@ -47,14 +48,14 @@ where
     }
 }
 
-impl<'a, P, F, A> Parser<'a> for Map<P, F>  
+impl<P, F, A> Parser for Map<P, F>  
 where
-    P: Parser<'a>,
+    P: Parser,
     F: Fn(<P as Parser>::Out) -> A
 {
     type Out = A;
 
-    fn call(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
+    fn call<'a>(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
         // let f = self.func;
         self.parser.call(input).map(move |(a, b)| {
             // (f(a), b)
@@ -64,16 +65,15 @@ where
 }
 
 
-// #[derive(Copy, Clone)]
 pub struct Bind<P, F> {
     parser: P,
     func: F
 }
 
-impl<'a, P, F, Q> Bind<P, F> 
+impl<P, F, Q> Bind<P, F> 
 where
-    P: Parser<'a>,
-    Q: Parser<'a>,
+    P: Parser,
+    Q: Parser,
     F: Fn(<P as Parser>::Out) -> Q,
 {
     pub fn new(parser: P, func: F) -> Self {
@@ -84,15 +84,15 @@ where
     }
 }
 
-impl<'a, P, F, Q> Parser<'a> for Bind<P, F> 
+impl<P, F, Q> Parser for Bind<P, F> 
 where
-    P: Parser<'a>,
-    Q: Parser<'a>,
+    P: Parser,
+    Q: Parser,
     F: Fn(<P as Parser>::Out) -> Q 
 {
-    type Out = <Q as Parser<'a>>::Out;
+    type Out = <Q as Parser>::Out;
 
-    fn call(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
+    fn call<'a>(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
         // let f = self.func;
         self.parser.call(input).and_then(|(a, b)| {
             // f(a).call(b)
@@ -125,7 +125,6 @@ where
 
 // impl<P: Parser> ParserOps for P {}
 
-// #[derive(Copy, Clone)]
 pub struct Zero<A> {
     phantom: std::marker::PhantomData<A>
 }
@@ -136,34 +135,32 @@ impl<A> Zero<A> {
     }
 }
 
-impl<'a, A> Parser<'a> for Zero<A> {
+impl<A> Parser for Zero<A> {
     type Out = A;
 
-    fn call(&self, _input: &'a str) -> Option<(Self::Out, &'a str)> {
+    fn call<'a>(&self, _input: &'a str) -> Option<(Self::Out, &'a str)> {
         None
     }
 }
 
-// #[derive(Copy, Clone)]
-pub struct Return<'a, A> {
-    data: &'a A
+pub struct Return<A> {
+    data: Rc<A>
 }
 
-impl<'a, A> Return<'a, A> {
-    pub fn new(data: &'a A) -> Self {
-        Self { data }
+impl<A> Return<A> {
+    pub fn new(data: A) -> Self {
+        Self { data: Rc::new(data) }
     }
 }
 
-impl<'a, 'b, A> Parser<'a> for Return<'b, A> {
-    type Out = A;
+impl<A> Parser for Return<A> {
+    type Out = Rc<A>;
 
-    fn call(&self, input: &'a str) -> Option<(A, &'a str)> {
-        Some((self.data.to_owned(), input))
+    fn call<'b>(&self, input: &'b str) -> Option<(Rc<A>, &'b str)> {
+        Some((Rc::clone(&self.data), input))
     }
 }
 
-// #[derive(Copy, Clone)]
 pub struct Item {}
 
 impl Item {
@@ -172,10 +169,10 @@ impl Item {
     }
 }
 
-impl<'a> Parser<'a> for Item {
+impl Parser for Item {
     type Out = char;
 
-    fn call(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
+    fn call<'a>(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
         input
             .chars()
             .next()
@@ -188,16 +185,16 @@ pub struct Take<P> {
     parser: P
 }
 
-impl<'a, P: Parser<'a>> Take<P> {
+impl<P: Parser> Take<P> {
     pub fn new(count: i32, parser: P) -> Self {
         Self { count, parser }
     }
 }
 
-impl<'a, P: Parser<'a>> Parser<'a> for Take<P> {
-    type Out = Vec<<P as Parser<'a>>::Out>;
+impl<P: Parser> Parser for Take<P> {
+    type Out = Vec<<P as Parser>::Out>;
 
-    fn call(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
+    fn call<'a>(&self, input: &'a str) -> Option<(Self::Out, &'a str)> {
         
         let mut v = Vec::new();
         let mut rest = input;
@@ -239,11 +236,11 @@ mod tests {
 
         let (result, _) = 
             Item::new()
-                .bind(|x| Return::new(format!("hi, {}", x)))
+                .bind(|x| Return::new(x.to_uppercase().to_string()))
                 .call(&stuff)
                 .unwrap();
 
-        assert_eq!("hi, h", result);
+        assert_eq!("H", *result);
     }
 
     #[test]
@@ -270,7 +267,6 @@ mod tests {
                 .call(&stuff)
                 .unwrap();
 
-        // assert_eq!(vec!['h', 'e', 'l'], result);
         assert_eq!(3, result);
         assert_eq!("lo world", rest);
     }
